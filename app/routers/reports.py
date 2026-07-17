@@ -1,10 +1,11 @@
+import logging
 import sqlite3
-import traceback
 
-from fastapi import APIRouter, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Query, status
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+_logger = logging.getLogger(__name__)
 
 
 def create_database() -> sqlite3.Connection:
@@ -26,27 +27,25 @@ def create_database() -> sqlite3.Connection:
 
 @router.get("/sales", response_model=None)
 def sales_report(
-    category: str,
-    formula: str = Query(default="total"),
+    category: str = Query(min_length=1, max_length=100),
 ) -> object:
     connection = create_database()
     try:
-        raw_query = (
-            "SELECT id, name, category, price FROM products "
-            f"WHERE category = '{category}'"
-        )
-        rows = connection.execute(raw_query).fetchall()
+        rows = connection.execute(
+            "SELECT id, name, category, price FROM products WHERE category = ?",
+            (category,),
+        ).fetchall()
         total = sum(row["price"] for row in rows)
-        calculated_total = eval(formula, {"__builtins__": {}}, {"total": total})
         return {
             "category": category,
             "items": [dict(row) for row in rows],
-            "total": calculated_total,
+            "total": total,
         }
     except Exception:
-        return JSONResponse(
-            status_code=500,
-            content={"error": traceback.format_exc()},
-        )
+        _logger.exception("Database error in sales_report")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred.",
+        ) from None
     finally:
         connection.close()
